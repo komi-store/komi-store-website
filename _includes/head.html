@@ -29,7 +29,7 @@ Front-matter knobs per page:
   {%- assign og_desc_enc = page_description | url_encode -%}
   {%- capture og_image -%}https://github-store-cms-oauth.rainxchzed.workers.dev/og?title={{ og_title_enc }}&description={{ og_desc_enc }}{%- endcapture -%}
 {%- else -%}
-  {%- assign og_image = "https://raw.githubusercontent.com/kurikomi-labs/komi-store/refs/heads/main/media-resources/banner.jpeg" -%}
+  {%- assign og_image = "https://raw.githubusercontent.com/komi-store/komi-store/refs/heads/main/media-resources/banner.jpeg" -%}
 {%- endif -%}
 
 <meta charset="UTF-8">
@@ -113,12 +113,12 @@ Front-matter knobs per page:
 {
   "@context": "https://schema.org",
   "@type": "Organization",
-  "name": "Kurikomi",
+  "name": "Komi Store Foundation",
   "alternateName": ["Komi Store", "GitHub Store", "OpenHub-Store"],
   "url": "{{ site.url }}",
   "logo": "{{ site.url }}/android-chrome-512x512.png",
   "sameAs": [
-    "https://github.com/kurikomi-labs",
+    "https://github.com/komi-store",
     "https://twitter.com/{{ site.social.twitter }}"
   ]
 }
@@ -168,24 +168,24 @@ Front-matter knobs per page:
     "price": "0",
     "priceCurrency": "USD"
   },
-  "downloadUrl": "https://github.com/kurikomi-labs/komi-store/releases",
+  "downloadUrl": "https://github.com/komi-store/komi-store/releases",
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "url": "{{ site.url }}",
   "image": "{{ site.url }}/android-chrome-512x512.png",
   "screenshot": [
-    "https://raw.githubusercontent.com/kurikomi-labs/komi-store/main/media-resources/screenshots/mobile/01.jpg",
-    "https://raw.githubusercontent.com/kurikomi-labs/komi-store/main/media-resources/screenshots/mobile/02.jpg",
-    "https://raw.githubusercontent.com/kurikomi-labs/komi-store/main/media-resources/screenshots/mobile/03.jpg"
+    "https://raw.githubusercontent.com/komi-store/komi-store/main/media-resources/screenshots/mobile/01.jpg",
+    "https://raw.githubusercontent.com/komi-store/komi-store/main/media-resources/screenshots/mobile/02.jpg",
+    "https://raw.githubusercontent.com/komi-store/komi-store/main/media-resources/screenshots/mobile/03.jpg"
   ],
   "author": {
-    "@type": "Person",
+    "@type": "Organization",
     "name": "{{ site.author.name }}",
     "url": "{{ site.author.url }}"
   },
   "publisher": {
     "@type": "Organization",
-    "name": "Kurikomi",
-    "url": "https://github.com/kurikomi-labs"
+    "name": "Komi Store Foundation",
+    "url": "https://github.com/komi-store"
   },
   "datePublished": "2025-11-15",
   "inLanguage": ["en", "ar", "bn", "zh-Hans", "es", "fr", "hi", "it", "ja", "ko", "pl", "ru", "tr"]
@@ -206,7 +206,7 @@ Front-matter knobs per page:
   "datePublished": "{{ page.date | date_to_xmlschema }}",
   "dateModified": "{{ page.last_modified_at | default: page.date | date_to_xmlschema }}",
   "author": {
-    "@type": "Person",
+    "@type": "Organization",
     "name": "{{ site.author.name }}",
     "url": "{{ site.author.url }}"
   },

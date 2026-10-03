@@ -1,6 +1,6 @@
 # Komi Store
 
-> Free, open-source app store for GitHub releases. Cross-platform (Android, Windows, macOS, Linux). Apache-2.0. Built by Kurikomi with Kotlin Multiplatform + Compose Multiplatform. Discovery, silent install, signing-key verification, and a multi-source mirror system for restricted networks.
+> Free, open-source app store for GitHub releases. Cross-platform (Android, Windows, macOS, Linux). Apache-2.0. Built by the Komi Store Foundation with Kotlin Multiplatform + Compose Multiplatform. Discovery, silent install, signing-key verification, and a multi-source mirror system for restricted networks.
 
 ## Core pages
 
@@ -16,9 +16,9 @@
 
 ## Project resources
 
-- [GitHub repository](https://github.com/kurikomi-labs/komi-store): Source code, releases, issue tracker.
-- [GitHub releases](https://github.com/kurikomi-labs/komi-store/releases): Latest installers for every platform.
-- [Wiki](https://github.com/kurikomi-labs/komi-store/wiki): How Komi Store discovers apps, installer extension list, listing requirements.
+- [GitHub repository](https://github.com/komi-store/komi-store): Source code, releases, issue tracker.
+- [GitHub releases](https://github.com/komi-store/komi-store/releases): Latest installers for every platform.
+- [Wiki](https://github.com/komi-store/komi-store/wiki): How Komi Store discovers apps, installer extension list, listing requirements.
 - [Discord](https://discord.github-store.org): Community + maintainer Q&A.
 
 ## Optional
