@@ -2,9 +2,9 @@ name: Refresh stats
 
 on:
   schedule:
-    # Daily at 03:17 UTC. Off-peak to avoid collisions with GitHub Pages
-    # rebuilds triggered by content pushes.
-    - cron: "17 3 * * *"
+    # Weekly, Mondays at 03:17 UTC. Off-peak to avoid collisions with
+    # GitHub Pages rebuilds triggered by content pushes.
+    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
           stars=$(curl -sSL --fail \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/kurikomi-labs/komi-store \
+            https://api.github.com/repos/komi-store/komi-store \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["stargazers_count"])')
           echo "stars=$stars" >> "$GITHUB_OUTPUT"
           echo "stars=$stars"
@@ -37,7 +37,9 @@ jobs:
           # Badge SVG ships an aria-label like aria-label="279K" or
           # aria-label="1.2M". Parse it back into an integer so the
           # hero counter can animate to a real number.
-          svg=$(curl -sSL --fail "https://api.github-store.org/v1/badge/kurikomi-labs/komi-store/downloads/5/2")
+          # Badge is keyed on the literal owner/repo — it does not follow
+          # GitHub renames, so this must track the repo's current name.
+          svg=$(curl -sSL --fail "https://api.github-store.org/v1/badge/komi-store/komi-store/downloads/5/2")
           label=$(echo "$svg" | grep -oE 'aria-label="[^"]+"' | head -1 | sed 's/aria-label="//;s/"//')
           updates=$(python3 - <<PY
           label = "$label".strip()
@@ -47,9 +49,13 @@ jobs:
           if suffix in ('K', 'M', 'B'):
               base = float(label[:-1])
               mult = {'K': 1_000, 'M': 1_000_000, 'B': 1_000_000_000}[suffix]
-              print(int(base * mult))
+              n = int(base * mult)
           else:
-              print(int(label.replace(',', '')))
+              n = int(label.replace(',', ''))
+          # The backend's error badge renders "0"; never publish that.
+          if n <= 0:
+              raise SystemExit("badge reported 0; refusing to overwrite stats")
+          print(n)
           PY
           )
           echo "updates=$updates" >> "$GITHUB_OUTPUT"
