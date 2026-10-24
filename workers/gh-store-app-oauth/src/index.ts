@@ -17,6 +17,12 @@ const VERIFIER_RE = /^[A-Za-z0-9_-]{43,128}$/;
 const CHALLENGE_RE = /^[A-Za-z0-9_-]{43}$/;
 const HANDOFF_RE = /^[A-Za-z0-9_-]{8,256}$/;
 const REASON_RE = /^[a-z0-9_]{1,64}$/i;
+// Backend `/v1/oauth/exchange` failures carry a machine-readable `error` code
+// (for example `state_missing_or_expired` or `github_bad_verification_code`).
+// Only codes matching this strict lower-case alphabet are echoed into the deep
+// link. 40 chars keeps `exchange_failed_<code>` (16 + 40 = 56) inside the
+// app's 64-char `error` sanitizer.
+const EXCHANGE_ERROR_CODE_RE = /^[a-z0-9_]{1,40}$/;
 const BLOB_RE = /^[A-Za-z0-9_-]{32,512}$/;
 
 // Bumped from 60 → 600 (10 min) after issue #730: a Windows user reported
@@ -30,6 +36,14 @@ const BLOB_RE = /^[A-Za-z0-9_-]{32,512}$/;
 // The backend's `oauth_ephemeral.expires_at` TTL is bumped in lockstep.
 const VERIFIER_TTL_SECONDS = 600;
 const MAX_BODY_BYTES = 2048;
+// Bounds for the backend error body read on a failed exchange. The body is
+// logged (redacted) to make backend error codes diagnosable, so it must be
+// read with a cap rather than trusted to be small.
+const MAX_ERROR_BODY_BYTES = 2048;
+const MAX_ERROR_BODY_LOG_CHARS = 512;
+// `Retry-After` is forwarded as delta-seconds within one day. HTTP-date values
+// and absurd delays are dropped rather than reinterpreted.
+const RETRY_AFTER_MAX_SECONDS = 86_400;
 const APP_SCOPE = "public_repo read:user";
 const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const CALLBACK_URL = "https://github-store.org/auth/callback";
@@ -238,7 +252,22 @@ async function handleCallback(url: URL, env: Env, req: Request): Promise<Respons
   }
 
   if (!exchangeResp.ok) {
-    return renderError(env, "exchange_failed", originalState);
+    const failure = await readExchangeFailure(exchangeResp, [
+      env.OAUTH_SERVICE_TOKEN,
+      verifier,
+      code,
+      originalState,
+    ]);
+    // Status, bounded/redacted body, and the state prefix are enough to
+    // correlate a report with backend logs. The verifier, GitHub code, full
+    // state, and service token are redacted out of the snippet first.
+    console.warn(
+      `[oauth-callback] exchange_failed status=${exchangeResp.status} reason=${failure.reason} ` +
+        `retry_after=${failure.retryAfter ?? "none"} body_truncated=${failure.bodyTruncated} ` +
+        `state_prefix=${statePrefix} cf_colo=${cfColo} ` +
+        `body=${JSON.stringify(failure.bodySnippet)}`,
+    );
+    return renderError(env, failure.reason, originalState, failure.retryAfter);
   }
 
   let handoff: string;
@@ -260,11 +289,134 @@ function renderSuccess(env: Env, handoff: string, state: string): Response {
   return htmlResponse(deepLinkPage(deepLink, "Sign-in complete. Returning to the app…"), 200);
 }
 
-function renderError(env: Env, reason: string, state: string): Response {
+function renderError(
+  env: Env,
+  reason: string,
+  state: string,
+  retryAfter: number | null = null,
+): Response {
   const params = new URLSearchParams({ error: reason });
   if (state) params.set("state", state);
+  if (retryAfter !== null) params.set("retry_after", String(retryAfter));
   const deepLink = `${env.APP_SCHEME}://auth?${params.toString()}`;
-  return htmlResponse(deepLinkPage(deepLink, `Sign-in failed (${escapeText(reason)}). Returning to the app…`), 200);
+  const retryNote =
+    retryAfter === null
+      ? ""
+      : retryAfter === 0
+        ? " You can try again now."
+        : ` Try again in ${retryAfter} second${retryAfter === 1 ? "" : "s"}.`;
+  return htmlResponse(
+    deepLinkPage(deepLink, `Sign-in failed (${escapeText(reason)}).${retryNote} Returning to the app…`),
+    200,
+  );
+}
+
+interface ExchangeFailure {
+  reason: string;
+  retryAfter: number | null;
+  bodySnippet: string;
+  bodyTruncated: boolean;
+}
+
+// Map a non-2xx exchange response to a deep-link reason. A safe backend
+// `error` code becomes `exchange_failed_<code>`; anything else (non-JSON body,
+// missing/over-long/unsafe code) keeps the generic `exchange_failed`, so the
+// app's existing handling for that reason still applies. The body is read with
+// a hard cap because it is attacker-adjacent data (a misrouted proxy can
+// return anything) and is redacted before it reaches the logs.
+async function readExchangeFailure(resp: Response, secrets: string[]): Promise<ExchangeFailure> {
+  const retryAfter = parseRetryAfterSeconds(resp.headers.get("Retry-After"));
+
+  let body: { text: string; truncated: boolean } = { text: "", truncated: false };
+  try {
+    body = await readBoundedText(resp, MAX_ERROR_BODY_BYTES);
+  } catch {
+    // A body-stream failure must not turn an exchange error into a 500.
+  }
+
+  let errorCode: string | null = null;
+  try {
+    const parsed: unknown = JSON.parse(body.text);
+    if (typeof parsed === "object" && parsed !== null) {
+      const candidate = (parsed as { error?: unknown }).error;
+      if (typeof candidate === "string" && EXCHANGE_ERROR_CODE_RE.test(candidate)) {
+        errorCode = candidate;
+      }
+    }
+  } catch {
+    // Non-JSON error page (CDN/proxy) — keep the generic reason.
+  }
+
+  return {
+    reason: errorCode === null ? "exchange_failed" : `exchange_failed_${errorCode}`,
+    retryAfter,
+    bodySnippet: truncateForLog(redactSecrets(body.text, secrets)),
+    bodyTruncated: body.truncated,
+  };
+}
+
+async function readBoundedText(
+  resp: Response,
+  maxBytes: number,
+): Promise<{ text: string; truncated: boolean }> {
+  if (!resp.body) return { text: "", truncated: false };
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let total = 0;
+  let truncated = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+      const allowed = maxBytes - total;
+      if (allowed <= 0) {
+        truncated = true;
+        break;
+      }
+      if (value.byteLength > allowed) {
+        text += decoder.decode(value.subarray(0, allowed), { stream: true });
+        truncated = true;
+        break;
+      }
+      text += decoder.decode(value, { stream: true });
+      total += value.byteLength;
+    }
+    if (!truncated) text += decoder.decode();
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // Stream already errored or closed; nothing left to release.
+    }
+  }
+  return { text, truncated };
+}
+
+function parseRetryAfterSeconds(raw: string | null): number | null {
+  if (raw === null) return null;
+  const trimmed = raw.trim();
+  if (!/^[0-9]{1,5}$/.test(trimmed)) return null;
+  const seconds = Number(trimmed);
+  if (!Number.isSafeInteger(seconds) || seconds > RETRY_AFTER_MAX_SECONDS) return null;
+  return seconds;
+}
+
+function redactSecrets(text: string, secrets: string[]): string {
+  let out = text;
+  for (const secret of secrets) {
+    // Shorter values would match unrelated body fragments.
+    if (secret.length < 8) continue;
+    out = out.split(secret).join("[redacted]");
+  }
+  return out;
+}
+
+function truncateForLog(text: string): string {
+  return text.length <= MAX_ERROR_BODY_LOG_CHARS
+    ? text
+    : `${text.slice(0, MAX_ERROR_BODY_LOG_CHARS)}...`;
 }
 
 function deepLinkPage(deepLink: string, message: string): string {

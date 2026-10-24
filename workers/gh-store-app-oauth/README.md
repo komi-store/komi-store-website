@@ -132,6 +132,9 @@ Worker behavior:
 5. Otherwise POST backend `/v1/oauth/exchange` with `{ code, state, code_verifier }`.
 6. On 2xx → render success HTML with `githubstore://auth?handoff=<H>&state=<original-state>`.
 7. On any failure → render error HTML with `githubstore://auth?error=<reason>&state=<original-state>`.
+   A non-2xx exchange response whose JSON body carries a safe `error` code is
+   reported as `exchange_failed_<code>`, and a numeric `Retry-After` is
+   forwarded as `retry_after`.
 
 The deep link returned to the app contains the **original** state value (without
 the encrypted blob), so the app's local state-matching code keeps comparing the
@@ -148,7 +151,7 @@ githubstore://auth?handoff=<id>&state=<original-state>
 **Failure:**
 
 ```
-githubstore://auth?error=<reason>&state=<original-state>
+githubstore://auth?error=<reason>&state=<original-state>[&retry_after=<seconds>]
 ```
 
 `reason` is one of:
@@ -159,10 +162,26 @@ githubstore://auth?error=<reason>&state=<original-state>
 | `missing_code`               | GitHub redirected without `code` and without `error`                 |
 | `encryption_unavailable`     | Worker `STATE_ENC_KEY` is missing or malformed (operator error)      |
 | `exchange_unreachable`       | Worker could not reach `BACKEND_EXCHANGE_URL`                        |
-| `exchange_failed`            | Backend `/v1/oauth/exchange` returned non-2xx                        |
+| `exchange_failed`            | Backend `/v1/oauth/exchange` returned non-2xx without a safe code    |
+| `exchange_failed_<code>`     | Backend returned non-2xx with a safe `error` code (see below)        |
 | `exchange_invalid_response`  | Backend response missing/malformed `handoff_id`                      |
 | `github_error`               | Catch-all sanitized GitHub `?error=` payload                         |
 | `access_denied`, …           | GitHub-supplied error code, passed through if it matches `[a-z0-9_]` |
+
+`exchange_failed_<code>` is used when the backend's non-2xx response body is
+JSON with an `error` field matching `^[a-z0-9_]{1,40}$` — for example
+`exchange_failed_state_missing_or_expired` or
+`exchange_failed_github_bad_verification_code`. Any other body (non-JSON, a
+missing field, an unsafe or over-long code) keeps the generic
+`exchange_failed`. The prefix plus a 40-char code is 56 characters, inside the
+app's 64-char `error` sanitizer.
+
+`retry_after` is present only when the failing exchange response carried a
+delta-seconds `Retry-After` header whose value is an integer in `0..86400`.
+HTTP-date values and larger delays are dropped rather than reinterpreted. The
+app may use it to delay a retry; the current app build ignores the extra
+parameter (its parser reads only `handoff`, `error`, and `state`) and shows the
+generic failure UI.
 
 The app should treat any unknown `reason` as a fatal failure and surface a
 generic "sign-in failed" message to the user.
@@ -368,9 +387,13 @@ naturally throttled by two independent gates:
   `Host` header is `api.github-store.org` (derived from the request URL —
   Cloudflare Workers does not let you override Host, so the URL is the source
   of truth).
-- The Worker never logs `code`, `state`, `code_verifier`, `code_challenge`,
-  `handoff_id`, `OAUTH_SERVICE_TOKEN`, or `STATE_ENC_KEY`. Status codes and
-  durations only. `wrangler tail` will show no sensitive values.
+- The Worker logs the 8-char original-state prefix for correlation, and on a
+  failed exchange the backend status plus a bounded (≤ 512 chars),
+  secret-redacted snippet of the backend response body. Known sensitive values
+  (`code`, the full `state`, `code_verifier`, `OAUTH_SERVICE_TOKEN`) are
+  replaced with `[redacted]` before logging; the Worker never logs
+  `code_challenge`, `handoff_id`, or `STATE_ENC_KEY`. `wrangler tail` therefore
+  shows no usable secrets.
 - Response pages set `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
   `X-Content-Type-Options: nosniff`, `X-Robots-Tag: noindex`.
 - The HTML deep-link page embeds the URL in a `JSON.stringify`d JS literal with
