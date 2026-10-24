@@ -238,7 +238,21 @@ async function handleCallback(url: URL, env: Env, req: Request): Promise<Respons
   }
 
   if (!exchangeResp.ok) {
-    return renderError(env, "exchange_failed", originalState);
+    const failureBody = await exchangeResp.text();
+    console.warn(
+      `[oauth-callback] exchange_failed status=${exchangeResp.status} ` +
+        `state_prefix=${originalState.slice(0, 8)} body=${failureBody.slice(0, 200)}`,
+    );
+    let reason = "exchange_failed";
+    try {
+      const parsed = JSON.parse(failureBody) as { error?: unknown };
+      if (typeof parsed.error === "string" && /^[a-z0-9_]{1,40}$/.test(parsed.error)) {
+        reason = `exchange_failed_${parsed.error}`;
+      }
+    } catch {
+      // Keep the generic reason when the backend did not return JSON.
+    }
+    return renderError(env, reason, originalState);
   }
 
   let handoff: string;
