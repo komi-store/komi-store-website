@@ -1,0 +1,38 @@
+name: Site checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  # jekyll-github-metadata reads the Pages API, as the real Pages build does.
+  pages: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_GEMFILE: ${{ github.workspace }}/.github/pages/Gemfile
+      JEKYLL_ENV: production
+      JEKYLL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PAGES_REPO_NWO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3.4"
+          bundler-cache: true
+
+      - name: Build strictly
+        run: |
+          set -euo pipefail
+          bundle exec jekyll build --strict_front_matter --config _config.yml,.github/pages/strict.yml 2>&1 | tee build.log
+          # Jekyll has no warnings-as-errors switch, so any line besides its normal progress output fails the build.
+          if grep -vE '^ *(Configuration file:|Source:|Destination:|Incremental build:|Generating\.\.\.|done in |Auto-regeneration:)' build.log; then
+            echo "::error::The Jekyll build printed the warnings above."
+            exit 1
+          fi
+
+      - name: Check HTML
+        run: bundle exec ruby .github/pages/proof.rb
