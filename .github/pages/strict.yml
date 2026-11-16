@@ -1,0 +1,5 @@
+liquid:
+  error_mode: strict
+  strict_filters: true
+  # Off: it reports every unset optional front-matter key or include parameter, and jekyll-sitemap's own template.
+  strict_variables: false
