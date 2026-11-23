@@ -1,0 +1,6 @@
+source "https://rubygems.org"
+
+# CI only: the toolchain classic GitHub Pages builds with (pages.github.com/versions), plus the HTML checker.
+gem "github-pages", "232", group: :jekyll_plugins
+gem "faraday-retry", "~> 2.4"
+gem "html-proofer", "5.2.2"
